@@ -1,0 +1,3 @@
+[submodule "BMEAN"]
+	path = BMEAN
+	url = ./BMEAN
