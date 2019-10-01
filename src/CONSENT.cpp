@@ -587,7 +587,7 @@ std::unordered_map<std::string, std::string> getSequencesMap(std::vector<Alignme
 vector<pair<vector<poa_gpu_utils::Task<vector<string>>>, unordered_map<kmer, unsigned>>>
 processRead_enqueue(
 		int tid, 
-		std::vector<Alignment>& alignments, 
+		vector<Alignment>& alignments, 
 		unsigned minSupport, 
 		unsigned maxSupport, 
 		unsigned windowSize, 
@@ -604,10 +604,6 @@ processRead_enqueue(
 	std::unordered_map<std::string, std::string> sequences = getSequencesMap(alignments);
 	std::vector<std::pair<unsigned, unsigned>> pilesPos = 
 		getAlignmentPilesPositions(alignments.begin()->qLength, alignments, minSupport, maxSupport, windowSize, windowOverlap);
-	//NOTE: check if this causes any problem later on....
-	//if (pilesPos.size() == 0) {
-	//	return std::make_pair(readId, "");
-	//}
 	
 	unsigned i = 0;
 
@@ -617,6 +613,10 @@ processRead_enqueue(
 	
 	vector<pair<vector<poa_gpu_utils::Task<vector<string>>>, unordered_map<kmer, unsigned>>> pilesTasks(pilesPos.size());
 
+	if(pilesPos.size() == 0){
+		return pilesTasks;
+	}
+
 	for (i = 0; i < pilesPos.size(); i++) {
 		curPile = getAlignmentPileSeq(alignments, minSupport, windowSize, windowOverlap, sequences, pilesPos[i].first, pilesPos[i].second, merSize, maxSupport);
 		templates[i] = curPile[0];
@@ -625,6 +625,31 @@ processRead_enqueue(
 							   solidThresh, windowSize, maxMSA, tid, path);
 	}
 	return pilesTasks;
+}
+
+void 
+processRead_enqueue_batch(
+		int tid, 
+		int n_threads,
+		int n,
+		vector<vector<Alignment>>& alignments, 
+		vector<vector<pair<vector<poa_gpu_utils::Task<vector<string>>>, unordered_map<kmer, unsigned>>>> &enqueued_tasks_v,
+		unsigned minSupport, 
+		unsigned maxSupport, 
+		unsigned windowSize, 
+		unsigned merSize, 
+		unsigned commonKMers, 
+		unsigned minAnchors,
+		unsigned solidThresh, 
+		unsigned windowOverlap, 
+		unsigned maxMSA, 
+		std::string path
+		){
+	
+	for(int i = tid; i < n; i += n_threads){
+		enqueued_tasks_v[i] = processRead_enqueue(tid, alignments[i], minSupport, maxSupport, windowSize, merSize, commonKMers, 
+				                          minAnchors, solidThresh, windowOverlap, maxMSA, path);
+	}
 }
 
 std::pair<std::string, std::string> processRead_dequeue(
@@ -650,8 +675,14 @@ std::pair<std::string, std::string> processRead_dequeue(
 	std::vector<std::pair<unsigned, unsigned>> pilesPos = 
 		getAlignmentPilesPositions(alignments.begin()->qLength, alignments, minSupport, maxSupport, windowSize, windowOverlap);
 	
+	if(pilesPos.size() == 0){
+		return std::make_pair(readId, "");
+	}
+
 	std::vector<std::string> curPile;
 	std::vector<std::string> templates(pilesPos.size());
+
+	//cerr << "piles pos size = " << pilesPos.size() << ", pilesTasks size = " << pilesTasks.size() << endl;
 
 	for (int i = 0; i < pilesPos.size(); i++) {  
 		curPile = getAlignmentPileSeq(alignments, minSupport, windowSize, windowOverlap, sequences, pilesPos[i].first, pilesPos[i].second, merSize, maxSupport);
@@ -674,6 +705,38 @@ std::pair<std::string, std::string> processRead_dequeue(
 		}
 	} else {
 		return std::make_pair(readId, correctedRead);
+	}
+}
+
+std::mutex out_write_mtx;
+
+void processRead_dequeue_batch(
+		int tid,
+		int n_threads,
+		int n,
+		vector<vector<pair<vector<poa_gpu_utils::Task<vector<string>>>, unordered_map<kmer, unsigned>>>> &pilesTasks_v, 
+		vector<vector<Alignment>>& alignments,
+		vector<pair<string, string>> &result_v,
+		unsigned minSupport, 
+		unsigned maxSupport, 
+		unsigned windowSize, 
+		unsigned merSize, 
+		unsigned commonKMers, 
+		unsigned minAnchors,
+		unsigned solidThresh, 
+		unsigned windowOverlap, 
+		unsigned maxMSA, 
+		std::string path
+		){
+
+	for(int i = tid; i < n; i += n_threads){
+		//cerr << "Dequeue task " << i << ", piles_s = " << pilesTasks_v.size() << ", alignments_s = " << alignments.size() << endl;
+		result_v[i] = processRead_dequeue(pilesTasks_v[i], alignments[i], minSupport, maxSupport, windowSize, merSize, commonKMers,
+				                  minAnchors, solidThresh, windowOverlap, maxMSA, path);
+ 		if (result_v[i].second.length() != 0) {
+			lock_guard<std::mutex> lck(out_write_mtx);
+			std::cout << ">" << result_v[i].first << std::endl << result_v[i].second << std::endl;
+		}
 	}
 }
 
@@ -784,6 +847,92 @@ std::vector<Alignment> getNextReadPile(std::ifstream& f) {
 	}
 
 	return curReadAlignments;
+}
+
+void runCorrection_gpu(std::string PAFIndex, std::string alignmentFile, unsigned minSupport, unsigned maxSupport, unsigned windowSize, unsigned merSize, unsigned commonKMers, unsigned minAnchors, unsigned solidThresh, unsigned windowOverlap, unsigned nbThreads, std::string readsFile, std::string proofFile, unsigned maxMSA, std::string path) {
+		
+	cerr << "[test]: running correction, " << nbThreads << " threads...\n";
+
+	std::ifstream templates(PAFIndex);
+	std::ifstream alignments(alignmentFile);
+	int batch_size = 1200000;
+	
+	//input of batch enqueue
+	vector<vector<Alignment>> curReadAlignments_v(batch_size);
+	vector<vector<pair<vector<poa_gpu_utils::Task<vector<string>>>, unordered_map<kmer, unsigned>>>> enqueued_tasks_v(batch_size);
+
+	std::string curRead, line;
+	curRead = "";
+
+	indexReads(readIndex, readsFile);
+	if (proofFile != "") {
+		indexReads(readIndex, proofFile);
+		doTrimRead = false;
+	}
+
+	std::string curTpl;
+	vector<pair<string,string>> result(batch_size); //output of batch dequeue
+
+	std::thread exec_thread;
+	vector<thread> task_threads(nbThreads);
+	MSABMAAC_gpu_init_batch(batch_size, exec_thread);
+
+	int n = -1;
+
+	while( n != 0){
+
+	cerr << "[test]: Into batch processing...\n";
+
+	getline(templates, curTpl);
+
+	//prefetch batch_size read alignments
+	for(n = 0; n < batch_size and !curTpl.empty(); n++){
+		curReadAlignments_v[n] = getReadPile(alignments, curTpl);
+		while(curReadAlignments_v[n].size() == 0 and !curTpl.empty()){
+			getline(templates, curTpl);
+			curReadAlignments_v[n] = getReadPile(alignments, curTpl);
+		}
+		getline(templates, curTpl);
+	}
+
+	cerr << "[test]: collected " << n << " tasks \n"; 
+
+	if(n == 0){
+		break;
+	}
+
+	for(int i = 0; i < nbThreads; i++){
+		task_threads[i] = thread(processRead_enqueue_batch, i, nbThreads, n, ref(curReadAlignments_v), ref(enqueued_tasks_v), minSupport, 
+				maxSupport, windowSize, merSize, commonKMers, minAnchors, solidThresh, windowOverlap, maxMSA, path);	
+	}
+
+	for(int i = 0; i < nbThreads; i++){
+		task_threads[i].join();
+	}
+
+	MSABMAAC_gpu_flush();
+
+	cerr << "[test]: tasks dequeue...\n";
+
+	for(int i = 0; i < nbThreads; i++){
+		task_threads[i] = thread(processRead_dequeue_batch, i, nbThreads, n, ref(enqueued_tasks_v), ref(curReadAlignments_v),
+				ref(result), minSupport, maxSupport, windowSize, merSize, commonKMers, minAnchors, solidThresh, 
+				windowOverlap, maxMSA, path);
+	}
+
+	for(int i = 0; i < nbThreads; i++){
+		task_threads[i].join();
+	}
+
+	cerr << "[test]: task dequeue joined...\n";
+
+	MSABMAAC_gpu_done();
+
+	exec_thread.join();
+
+	cerr << "[test]: exec thread joined...\n";
+
+	} //end of all batches
 }
 
 void runCorrection(std::string PAFIndex, std::string alignmentFile, unsigned minSupport, unsigned maxSupport, unsigned windowSize, unsigned merSize, unsigned commonKMers, unsigned minAnchors, unsigned solidThresh, unsigned windowOverlap, unsigned nbThreads, std::string readsFile, std::string proofFile, unsigned maxMSA, std::string path) {

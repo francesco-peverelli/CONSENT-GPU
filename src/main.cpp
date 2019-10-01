@@ -1,6 +1,11 @@
 #include "CONSENT.h"
 
+#define GPU 1
+
 int main(int argc, char* argv[]) {
+
+	cerr << "This binary was called \n";
+
 	if (argc < 2) {
 		fprintf(stderr, "Usage: %s [-a alignmentFile.paf] [-s minSupportForGoodRegions] [-l minLengthForGoodRegions] [-j threadsNb] \n\n", argv[0]);
 		exit(EXIT_FAILURE);
@@ -81,8 +86,23 @@ int main(int argc, char* argv[]) {
 				exit(EXIT_FAILURE);
         }
     }
-    
+
+	cerr << "In main...\n";
+   
+#if GPU 
+	
+	cerr << "Running gpu correction...\n ";
+
+	runCorrection_gpu(PAFIndex, alignmentFile, minSupport, maxSupport, windowSize, merSize, commonKMers, minAnchors, solidThresh, windowOverlap, nbThreads, readsFile, proofFile, maxMSA, path);
+
+	cerr << "Correction returned\n";
+
+#endif
+#if (GPU == 0)
+
+	cerr << "Running cpu correction...\n "; 
 	runCorrection(PAFIndex, alignmentFile, minSupport, maxSupport, windowSize, merSize, commonKMers, minAnchors, solidThresh, windowOverlap, nbThreads, readsFile, proofFile, maxMSA, path);
 
+#endif
 	return EXIT_SUCCESS;
 }
