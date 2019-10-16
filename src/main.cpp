@@ -1,10 +1,12 @@
 #include "CONSENT.h"
+#include<chrono>
+#include<fstream>
+#include<ctime>
 
 #define GPU 1
+#define NOW std::chrono::high_resolution_clock::now()
 
 int main(int argc, char* argv[]) {
-
-	cerr << "This binary was called \n";
 
 	if (argc < 2) {
 		fprintf(stderr, "Usage: %s [-a alignmentFile.paf] [-s minSupportForGoodRegions] [-l minLengthForGoodRegions] [-j threadsNb] \n\n", argv[0]);
@@ -86,23 +88,27 @@ int main(int argc, char* argv[]) {
 				exit(EXIT_FAILURE);
         }
     }
+	auto corr_s = NOW;
 
-	cerr << "In main...\n";
-   
 #if GPU 
 	
-	cerr << "Running gpu correction...\n ";
-
 	runCorrection_gpu(PAFIndex, alignmentFile, minSupport, maxSupport, windowSize, merSize, commonKMers, minAnchors, solidThresh, windowOverlap, nbThreads, readsFile, proofFile, maxMSA, path);
-
-	cerr << "Correction returned\n";
 
 #endif
 #if (GPU == 0)
 
-	cerr << "Running cpu correction...\n "; 
 	runCorrection(PAFIndex, alignmentFile, minSupport, maxSupport, windowSize, merSize, commonKMers, minAnchors, solidThresh, windowOverlap, nbThreads, readsFile, proofFile, maxMSA, path);
 
 #endif
+	auto corr_e = NOW;
+
+	auto tot_time = std::chrono::duration_cast<std::chrono::milliseconds>(corr_e - corr_s);
+
+	std::ofstream outfile;
+	outfile.open("c_timings.txt", std::ios_base::app);
+		
+	std::time_t st_time = std::chrono::system_clock::to_time_t(corr_s);
+	outfile << "Timed " << std::ctime(&st_time) << ": " << tot_time.count() << " milliseconds\n";	
+
 	return EXIT_SUCCESS;
 }

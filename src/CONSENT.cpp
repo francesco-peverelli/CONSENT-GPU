@@ -601,6 +601,7 @@ processRead_enqueue(
 		){
 
 	std::string readId = alignments.begin()->qName;
+	//cerr << "Enqueue of read " << readId << endl;
 	std::unordered_map<std::string, std::string> sequences = getSequencesMap(alignments);
 	std::vector<std::pair<unsigned, unsigned>> pilesPos = 
 		getAlignmentPilesPositions(alignments.begin()->qLength, alignments, minSupport, maxSupport, windowSize, windowOverlap);
@@ -734,8 +735,9 @@ void processRead_dequeue_batch(
 		result_v[i] = processRead_dequeue(pilesTasks_v[i], alignments[i], minSupport, maxSupport, windowSize, merSize, commonKMers,
 				                  minAnchors, solidThresh, windowOverlap, maxMSA, path);
  		if (result_v[i].second.length() != 0) {
-			lock_guard<std::mutex> lck(out_write_mtx);
+			out_write_mtx.lock();
 			std::cout << ">" << result_v[i].first << std::endl << result_v[i].second << std::endl;
+			out_write_mtx.unlock();
 		}
 	}
 }
@@ -850,16 +852,16 @@ std::vector<Alignment> getNextReadPile(std::ifstream& f) {
 }
 
 void runCorrection_gpu(std::string PAFIndex, std::string alignmentFile, unsigned minSupport, unsigned maxSupport, unsigned windowSize, unsigned merSize, unsigned commonKMers, unsigned minAnchors, unsigned solidThresh, unsigned windowOverlap, unsigned nbThreads, std::string readsFile, std::string proofFile, unsigned maxMSA, std::string path) {
-		
-	cerr << "[test]: running correction, " << nbThreads << " threads...\n";
-
+	
 	std::ifstream templates(PAFIndex);
 	std::ifstream alignments(alignmentFile);
-	int batch_size = 1200000;
 	
-	//input of batch enqueue
+	int batch_size = 600000;
+	
 	vector<vector<Alignment>> curReadAlignments_v(batch_size);
 	vector<vector<pair<vector<poa_gpu_utils::Task<vector<string>>>, unordered_map<kmer, unsigned>>>> enqueued_tasks_v(batch_size);
+	
+	cerr << nbThreads << " active threads\n";
 
 	std::string curRead, line;
 	curRead = "";
@@ -870,18 +872,22 @@ void runCorrection_gpu(std::string PAFIndex, std::string alignmentFile, unsigned
 		doTrimRead = false;
 	}
 
-	std::string curTpl;
-	vector<pair<string,string>> result(batch_size); //output of batch dequeue
+	std::thread exec_thread; 
 
-	std::thread exec_thread;
-	vector<thread> task_threads(nbThreads);
+	//initialize a concurrency manager object which holds the GPU results
 	MSABMAAC_gpu_init_batch(batch_size, exec_thread);
 
 	int n = -1;
 
 	while( n != 0){
 
-	cerr << "[test]: Into batch processing...\n";
+	std::string curTpl;
+	vector<pair<string,string>> result(batch_size); //output of batch dequeue
+	//vector<vector<Alignment>> curReadAlignments_v(batch_size);
+	//vector<vector<pair<vector<poa_gpu_utils::Task<vector<string>>>, unordered_map<kmer, unsigned>>>> enqueued_tasks_v(batch_size);
+	vector<thread> task_threads(nbThreads);
+	
+	cerr << "Reading alignments " << endl;
 
 	getline(templates, curTpl);
 
@@ -894,12 +900,13 @@ void runCorrection_gpu(std::string PAFIndex, std::string alignmentFile, unsigned
 		}
 		getline(templates, curTpl);
 	}
-
-	cerr << "[test]: collected " << n << " tasks \n"; 
-
+	
+	//if no read alignments left, exit
 	if(n == 0){
 		break;
 	}
+
+	cerr << "Task enqueue " << endl;
 
 	for(int i = 0; i < nbThreads; i++){
 		task_threads[i] = thread(processRead_enqueue_batch, i, nbThreads, n, ref(curReadAlignments_v), ref(enqueued_tasks_v), minSupport, 
@@ -910,9 +917,11 @@ void runCorrection_gpu(std::string PAFIndex, std::string alignmentFile, unsigned
 		task_threads[i].join();
 	}
 
+	cerr << "Flush start" << endl;
+
 	MSABMAAC_gpu_flush();
 
-	cerr << "[test]: tasks dequeue...\n";
+	cerr << "Flush end" << endl;
 
 	for(int i = 0; i < nbThreads; i++){
 		task_threads[i] = thread(processRead_dequeue_batch, i, nbThreads, n, ref(enqueued_tasks_v), ref(curReadAlignments_v),
@@ -924,15 +933,25 @@ void runCorrection_gpu(std::string PAFIndex, std::string alignmentFile, unsigned
 		task_threads[i].join();
 	}
 
-	cerr << "[test]: task dequeue joined...\n";
+	cerr << "Dequeue end" << endl;
 
 	MSABMAAC_gpu_done();
 
+	cerr << "GPU done" << endl;
+
 	exec_thread.join();
 
-	cerr << "[test]: exec thread joined...\n";
+	cerr << "Executor done" << endl;
+
+	//vector<pair<string,string>>().swap(result); //output of batch dequeue
+	//vector<vector<Alignment>>().swap(curReadAlignments_v);
+	//vector<vector<pair<vector<poa_gpu_utils::Task<vector<string>>>, unordered_map<kmer, unsigned>>>>().swap(enqueued_tasks_v);
+	//vector<thread>().swap(task_threads);
+	
 
 	} //end of all batches
+
+	MSABMAAC_exit();
 }
 
 void runCorrection(std::string PAFIndex, std::string alignmentFile, unsigned minSupport, unsigned maxSupport, unsigned windowSize, unsigned merSize, unsigned commonKMers, unsigned minAnchors, unsigned solidThresh, unsigned windowOverlap, unsigned nbThreads, std::string readsFile, std::string proofFile, unsigned maxMSA, std::string path) {
@@ -978,7 +997,7 @@ void runCorrection(std::string PAFIndex, std::string alignmentFile, unsigned min
     	// Get the job results
         curRes = results[curJob].get();
         if (curRes.second.length() != 0) {
-	        std::cout << ">" << curRes.first << std::endl << curRes.second << std::endl;
+	        //std::cout << ">" << curRes.first << std::endl << curRes.second << std::endl;
 	    }
         jobsCompleted++;
         
@@ -1004,7 +1023,7 @@ void runCorrection(std::string PAFIndex, std::string alignmentFile, unsigned min
         // Get the job results
         curRes = results[curJob].get();
         if (curRes.second.length() != 0) {
-	        std::cout << ">" << curRes.first << std::endl << curRes.second << std::endl;
+	        //std::cout << ">" << curRes.first << std::endl << curRes.second << std::endl;
 	    }
         jobsCompleted++;
         
