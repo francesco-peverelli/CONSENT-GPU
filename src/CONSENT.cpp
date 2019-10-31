@@ -9,10 +9,23 @@
 #include "../BMEAN/bmean.h"
 #include "../BMEAN/utils.h"
 #include "../BMEAN/Complete-Striped-Smith-Waterman-Library/src/ssw_cpp.h"
+#include "sys/time.h"
+#include "sys/resource.h"
 
 std::mutex outMtx;
+std::mutex break_mtx;
 std::map<std::string, std::vector<bool>> readIndex;
 bool doTrimRead = true;
+
+uint64_t getMemInfo(){
+	
+	struct rusage r_usage;
+
+	getrusage(RUSAGE_SELF,&r_usage);
+
+	return r_usage.ru_maxrss;
+}
+
 
 vector<string> splitString(string s, string delimiter) {
     size_t pos_start = 0, pos_end, delim_len = delimiter.length();
@@ -632,7 +645,7 @@ void
 processRead_enqueue_batch(
 		int tid, 
 		int n_threads,
-		int n,
+		int &n,
 		vector<vector<Alignment>>& alignments, 
 		vector<vector<pair<vector<poa_gpu_utils::Task<vector<string>>>, unordered_map<kmer, unsigned>>>> &enqueued_tasks_v,
 		unsigned minSupport, 
@@ -644,12 +657,24 @@ processRead_enqueue_batch(
 		unsigned solidThresh, 
 		unsigned windowOverlap, 
 		unsigned maxMSA, 
-		std::string path
+		std::string path,
+		bool &early_break
 		){
 	
 	for(int i = tid; i < n; i += n_threads){
+		//we can do rough conservative cutoff here:
+		//assign n
 		enqueued_tasks_v[i] = processRead_enqueue(tid, alignments[i], minSupport, maxSupport, windowSize, merSize, commonKMers, 
 				                          minAnchors, solidThresh, windowOverlap, maxMSA, path);
+		if(MSABMAAC_gpu_get_manager_tasks()  >= 2000000){
+			lock_guard<mutex> lock(break_mtx);
+			if(!early_break){
+				cerr << "Thread " << tid << " triggered cutoff at " << i << ": " << MSABMAAC_gpu_get_manager_tasks()  << "\n";
+				system(">&2 free --giga");
+				early_break = true;
+				n = i;
+			}
+		}
 	}
 }
 
@@ -859,9 +884,9 @@ void runCorrection_gpu(std::string PAFIndex, std::string alignmentFile, unsigned
 	int batch_size = 600000;
 	
 	vector<vector<Alignment>> curReadAlignments_v(batch_size);
-	vector<vector<pair<vector<poa_gpu_utils::Task<vector<string>>>, unordered_map<kmer, unsigned>>>> enqueued_tasks_v(batch_size);
 	
 	cerr << nbThreads << " active threads\n";
+	cerr << "Mem used: " << getMemInfo() << endl;
 
 	std::string curRead, line;
 	curRead = "";
@@ -872,27 +897,36 @@ void runCorrection_gpu(std::string PAFIndex, std::string alignmentFile, unsigned
 		doTrimRead = false;
 	}
 
-	std::thread exec_thread; 
-
-	//initialize a concurrency manager object which holds the GPU results
-	MSABMAAC_gpu_init_batch(batch_size, exec_thread);
-
 	int n = -1;
+	bool early_break = false;
+	int tasks_num = 0;
+	std::thread exec_thread; 
 
 	while( n != 0){
 
 	std::string curTpl;
 	vector<pair<string,string>> result(batch_size); //output of batch dequeue
-	//vector<vector<Alignment>> curReadAlignments_v(batch_size);
-	//vector<vector<pair<vector<poa_gpu_utils::Task<vector<string>>>, unordered_map<kmer, unsigned>>>> enqueued_tasks_v(batch_size);
+	vector<vector<pair<vector<poa_gpu_utils::Task<vector<string>>>, unordered_map<kmer, unsigned>>>> enqueued_tasks_v(batch_size);
 	vector<thread> task_threads(nbThreads);
+
+	//
+	//Correctly restore state (counters) after early break:
+	//n = prev(n): split the indexes
+	//
 	
 	cerr << "Reading alignments " << endl;
 
 	getline(templates, curTpl);
 
+	if(!early_break){
+		n = 0;
+	}else{
+		n = tasks_num;
+		early_break = false;
+	}
+
 	//prefetch batch_size read alignments
-	for(n = 0; n < batch_size and !curTpl.empty(); n++){
+	for(; n < batch_size and !curTpl.empty(); n++){
 		curReadAlignments_v[n] = getReadPile(alignments, curTpl);
 		while(curReadAlignments_v[n].size() == 0 and !curTpl.empty()){
 			getline(templates, curTpl);
@@ -906,11 +940,21 @@ void runCorrection_gpu(std::string PAFIndex, std::string alignmentFile, unsigned
 		break;
 	}
 
+	//initialize a concurrency manager object which holds the GPU results
+	MSABMAAC_gpu_init_batch(batch_size, exec_thread);
+
+	//set tasks to execute to alignments read initially
+	tasks_num = n;
+
 	cerr << "Task enqueue " << endl;
 
+	//break here at some point == do a flush, modify n
+	//set a new max_n, prevent max_n from being set again
+	//--> thread-safe FLUSH flag + new_n value set
 	for(int i = 0; i < nbThreads; i++){
-		task_threads[i] = thread(processRead_enqueue_batch, i, nbThreads, n, ref(curReadAlignments_v), ref(enqueued_tasks_v), minSupport, 
-				maxSupport, windowSize, merSize, commonKMers, minAnchors, solidThresh, windowOverlap, maxMSA, path);	
+		task_threads[i] = thread(processRead_enqueue_batch, i, nbThreads, ref(tasks_num), ref(curReadAlignments_v), ref(enqueued_tasks_v),
+				minSupport, maxSupport, windowSize, merSize, commonKMers, minAnchors, solidThresh, windowOverlap, maxMSA, path,
+				ref(early_break));	
 	}
 
 	for(int i = 0; i < nbThreads; i++){
@@ -923,8 +967,9 @@ void runCorrection_gpu(std::string PAFIndex, std::string alignmentFile, unsigned
 
 	cerr << "Flush end" << endl;
 
+	//record enqueue breakpoint to dequeue properely
 	for(int i = 0; i < nbThreads; i++){
-		task_threads[i] = thread(processRead_dequeue_batch, i, nbThreads, n, ref(enqueued_tasks_v), ref(curReadAlignments_v),
+		task_threads[i] = thread(processRead_dequeue_batch, i, nbThreads, tasks_num, ref(enqueued_tasks_v), ref(curReadAlignments_v),
 				ref(result), minSupport, maxSupport, windowSize, merSize, commonKMers, minAnchors, solidThresh, 
 				windowOverlap, maxMSA, path);
 	}
@@ -943,15 +988,10 @@ void runCorrection_gpu(std::string PAFIndex, std::string alignmentFile, unsigned
 
 	cerr << "Executor done" << endl;
 
-	//vector<pair<string,string>>().swap(result); //output of batch dequeue
-	//vector<vector<Alignment>>().swap(curReadAlignments_v);
-	//vector<vector<pair<vector<poa_gpu_utils::Task<vector<string>>>, unordered_map<kmer, unsigned>>>>().swap(enqueued_tasks_v);
-	//vector<thread>().swap(task_threads);
-	
+	MSABMAAC_exit();
 
 	} //end of all batches
 
-	MSABMAAC_exit();
 }
 
 void runCorrection(std::string PAFIndex, std::string alignmentFile, unsigned minSupport, unsigned maxSupport, unsigned windowSize, unsigned merSize, unsigned commonKMers, unsigned minAnchors, unsigned solidThresh, unsigned windowOverlap, unsigned nbThreads, std::string readsFile, std::string proofFile, unsigned maxMSA, std::string path) {

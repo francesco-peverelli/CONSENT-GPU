@@ -1,7 +1,7 @@
 CC = g++ -std=c++11
 NVCC = nvcc
-CFLAGS  = -g -Wall -O3 -std=c++11
-NVCCFLAGS = -g -O3 -std=c++11 -w
+CFLAGS  = -Wall -O3 -std=c++11
+NVCCFLAGS = -O3 -std=c++11 -w
 LDFLAGS = -lpthread
 
 all: CONSENT

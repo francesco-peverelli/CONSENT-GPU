@@ -178,11 +178,7 @@ else
 fi
 
 echo "["$(date)"] Correcting the long reads calling "$LRSCf/bin/CONSENT""
-valgrind --leak-check=full \
-	         --show-leak-kinds=all \
-		          --track-origins=yes \
-			           --verbose \
-				            --log-file=valgrind-out.txt $LRSCf/bin/CONSENT -i $tmpdir/"$PAFIndex" -a $tmpdir/"$alignments" -s "$minSupport" -S "$maxSupport" -l "$windowSize" -k "$merSize" -c "$commonKMers" -A "$minAnchors" -f "$solid" -m "$windowOverlap" -j "$nproc" -r "$reads" -M "$maxMSA" -p "$LRSCf" >> "$out"
+$LRSCf/bin/CONSENT -i $tmpdir/"$PAFIndex" -a $tmpdir/"$alignments" -s "$minSupport" -S "$maxSupport" -l "$windowSize" -k "$merSize" -c "$commonKMers" -A "$minAnchors" -f "$solid" -m "$windowOverlap" -j "$nproc" -r "$reads" -M "$maxMSA" -p "$LRSCf" >> "$out"
 echo "["$(date)"] Removing the temporary files"
 rm $tmpdir/"$alignments"
 rm $tmpdir/"$PAFIndex"
