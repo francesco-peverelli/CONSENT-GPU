@@ -30,3 +30,9 @@ Timed Wed Oct 16 06:55:16 2019
 : 223925 milliseconds
 Timed Fri Oct 18 07:09:22 2019
 : 222607 milliseconds
+Timed Thu Oct 31 07:51:53 2019
+: 27 milliseconds
+Timed Thu Oct 31 08:18:33 2019
+: 1807254 milliseconds
+Timed Thu Nov  7 03:13:46 2019
+: 198147 milliseconds
