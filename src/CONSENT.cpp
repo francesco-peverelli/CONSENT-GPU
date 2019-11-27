@@ -645,7 +645,9 @@ void
 processRead_enqueue_batch(
 		int tid, 
 		int n_threads,
-		int &n,
+		int n,
+		vector<int> &tasks_idx,
+		vector<int> &prev_tasks_idx,
 		vector<vector<Alignment>>& alignments, 
 		vector<vector<pair<vector<poa_gpu_utils::Task<vector<string>>>, unordered_map<kmer, unsigned>>>> &enqueued_tasks_v,
 		unsigned minSupport, 
@@ -660,22 +662,31 @@ processRead_enqueue_batch(
 		std::string path,
 		bool &early_break
 		){
-	
-	for(int i = tid; i < n; i += n_threads){
+
+	if(tasks_idx[tid] == 0){
+		tasks_idx[tid] = tid;
+		prev_tasks_idx[tid] = tid;
+	}
+	//cerr << tid << ",n: " << n << " tasks_idx[tid]=" << tasks_idx[tid] << endl;
+	int i;
+	for(i = tasks_idx[tid]; i < n; i += n_threads){
 		//we can do rough conservative cutoff here:
 		//assign n
 		enqueued_tasks_v[i] = processRead_enqueue(tid, alignments[i], minSupport, maxSupport, windowSize, merSize, commonKMers, 
 				                          minAnchors, solidThresh, windowOverlap, maxMSA, path);
-		if(MSABMAAC_gpu_get_manager_tasks()  >= 2000000){
+		if(MSABMAAC_gpu_get_manager_tasks()  >= 5000000){
 			lock_guard<mutex> lock(break_mtx);
 			if(!early_break){
 				cerr << "Thread " << tid << " triggered cutoff at " << i << ": " << MSABMAAC_gpu_get_manager_tasks()  << "\n";
 				system(">&2 free --giga");
 				early_break = true;
-				n = i;
 			}
-		}
+			break;
+		}//else cerr << "t=" << MSABMAAC_gpu_get_manager_tasks() << endl;
 	}
+	//cerr << tid << " enqueued " << prev_tasks_idx[tid] << " to " << i << endl;
+	tasks_idx[tid] = i;
+	
 }
 
 std::pair<std::string, std::string> processRead_dequeue(
@@ -739,10 +750,10 @@ std::mutex out_write_mtx;
 void processRead_dequeue_batch(
 		int tid,
 		int n_threads,
-		int n,
+		vector<int> tasks_idx,
+		vector<int> &prev_tasks_idx,
 		vector<vector<pair<vector<poa_gpu_utils::Task<vector<string>>>, unordered_map<kmer, unsigned>>>> &pilesTasks_v, 
 		vector<vector<Alignment>>& alignments,
-		vector<pair<string, string>> &result_v,
 		unsigned minSupport, 
 		unsigned maxSupport, 
 		unsigned windowSize, 
@@ -755,16 +766,18 @@ void processRead_dequeue_batch(
 		std::string path
 		){
 
-	for(int i = tid; i < n; i += n_threads){
+	for(int i = prev_tasks_idx[tid]; i < tasks_idx[tid]; i += n_threads){
 		//cerr << "Dequeue task " << i << ", piles_s = " << pilesTasks_v.size() << ", alignments_s = " << alignments.size() << endl;
-		result_v[i] = processRead_dequeue(pilesTasks_v[i], alignments[i], minSupport, maxSupport, windowSize, merSize, commonKMers,
+		auto result_p = processRead_dequeue(pilesTasks_v[i], alignments[i], minSupport, maxSupport, windowSize, merSize, commonKMers,
 				                  minAnchors, solidThresh, windowOverlap, maxMSA, path);
- 		if (result_v[i].second.length() != 0) {
+ 		if (result_p.second.length() != 0) {
 			out_write_mtx.lock();
-			std::cout << ">" << result_v[i].first << std::endl << result_v[i].second << std::endl;
+			std::cout << ">" << result_p.first << std::endl << result_p.second << std::endl;
 			out_write_mtx.unlock();
 		}
 	}
+	//cerr << tid << " dequeued " << prev_tasks_idx[tid] << " to " << tasks_idx[tid] << endl;
+	prev_tasks_idx[tid] = tasks_idx[tid];
 }
 
 std::pair<std::string, std::string> processRead(int id, std::vector<Alignment>& alignments, unsigned minSupport, unsigned maxSupport, unsigned windowSize, unsigned merSize, unsigned commonKMers, unsigned minAnchors,unsigned solidThresh, unsigned windowOverlap, unsigned maxMSA, std::string path) {
@@ -881,12 +894,11 @@ void runCorrection_gpu(std::string PAFIndex, std::string alignmentFile, unsigned
 	std::ifstream templates(PAFIndex);
 	std::ifstream alignments(alignmentFile);
 	
-	int batch_size = 600000;
+	int batch_size = 1200000;
 	
 	vector<vector<Alignment>> curReadAlignments_v(batch_size);
 	
 	cerr << nbThreads << " active threads\n";
-	cerr << "Mem used: " << getMemInfo() << endl;
 
 	std::string curRead, line;
 	curRead = "";
@@ -899,13 +911,13 @@ void runCorrection_gpu(std::string PAFIndex, std::string alignmentFile, unsigned
 
 	int n = -1;
 	bool early_break = false;
-	int tasks_num = 0;
+	vector<int> tasks_idx(nbThreads, 0);
+	vector<int> prev_tasks_idx(nbThreads, 0);
 	std::thread exec_thread; 
 
 	while( n != 0){
 
 	std::string curTpl;
-	vector<pair<string,string>> result(batch_size); //output of batch dequeue
 	vector<vector<pair<vector<poa_gpu_utils::Task<vector<string>>>, unordered_map<kmer, unsigned>>>> enqueued_tasks_v(batch_size);
 	vector<thread> task_threads(nbThreads);
 
@@ -914,15 +926,12 @@ void runCorrection_gpu(std::string PAFIndex, std::string alignmentFile, unsigned
 	//n = prev(n): split the indexes
 	//
 	
-	cerr << "Reading alignments " << endl;
+	cerr << "Reading alignments..." << endl;
 
 	getline(templates, curTpl);
 
 	if(!early_break){
 		n = 0;
-	}else{
-		n = tasks_num;
-		early_break = false;
 	}
 
 	//prefetch batch_size read alignments
@@ -934,27 +943,27 @@ void runCorrection_gpu(std::string PAFIndex, std::string alignmentFile, unsigned
 		}
 		getline(templates, curTpl);
 	}
-	
+
 	//if no read alignments left, exit
-	if(n == 0){
+	if(n == 0 && !early_break){
 		break;
+	}else{
+		early_break = false;
 	}
 
 	//initialize a concurrency manager object which holds the GPU results
 	MSABMAAC_gpu_init_batch(batch_size, exec_thread);
 
-	//set tasks to execute to alignments read initially
-	tasks_num = n;
-
+	cerr << "Alignments: " << n << ", a/b_size= " << curReadAlignments_v.size() << ", " << enqueued_tasks_v.size() << ", " << tasks_idx.size() << endl;
 	cerr << "Task enqueue " << endl;
 
 	//break here at some point == do a flush, modify n
 	//set a new max_n, prevent max_n from being set again
 	//--> thread-safe FLUSH flag + new_n value set
 	for(int i = 0; i < nbThreads; i++){
-		task_threads[i] = thread(processRead_enqueue_batch, i, nbThreads, ref(tasks_num), ref(curReadAlignments_v), ref(enqueued_tasks_v),
-				minSupport, maxSupport, windowSize, merSize, commonKMers, minAnchors, solidThresh, windowOverlap, maxMSA, path,
-				ref(early_break));	
+		task_threads[i] = thread(processRead_enqueue_batch, i, nbThreads, n, ref(tasks_idx), ref(prev_tasks_idx), 
+				ref(curReadAlignments_v), ref(enqueued_tasks_v), minSupport, maxSupport, windowSize, merSize, 
+				commonKMers, minAnchors, solidThresh, windowOverlap, maxMSA, path, ref(early_break));	
 	}
 
 	for(int i = 0; i < nbThreads; i++){
@@ -969,8 +978,8 @@ void runCorrection_gpu(std::string PAFIndex, std::string alignmentFile, unsigned
 
 	//record enqueue breakpoint to dequeue properely
 	for(int i = 0; i < nbThreads; i++){
-		task_threads[i] = thread(processRead_dequeue_batch, i, nbThreads, tasks_num, ref(enqueued_tasks_v), ref(curReadAlignments_v),
-				ref(result), minSupport, maxSupport, windowSize, merSize, commonKMers, minAnchors, solidThresh, 
+		task_threads[i] = thread(processRead_dequeue_batch, i, nbThreads, tasks_idx, ref(prev_tasks_idx), ref(enqueued_tasks_v), 
+				ref(curReadAlignments_v), minSupport, maxSupport, windowSize, merSize, commonKMers, minAnchors, solidThresh, 
 				windowOverlap, maxMSA, path);
 	}
 
