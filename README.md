@@ -1,5 +1,7 @@
 # CONSENT
 
+https://github.com/morispi/CONSENT
+
 CONSENT (sCalable self-cOrrectioN of long reads with multiple SEquence alignmeNT) is a self-correction method for long reads.
 It works by, first, computing overlaps between the long reads, in order to define an alignment pile (i.e. a set of overlapping reads used for
 correction) for each read. Each read's alignment pile is then further divided into smaller windows, that are corrected idependently.
@@ -15,6 +17,16 @@ Requirments
   - A g++ version supporting C++11
   - fpa (at least v0.4) accessible through your PATH environment variable (https://github.com/natir/fpa)
   
+# GPU ACCELERATION
+
+Additional Requirements
+--------------
+
+  - A CUDA capable GPU.
+  - CUDA Toolkit 9.0 or higher.
+  
+NOTE: the settings in
+
 Installation
 --------------
 
