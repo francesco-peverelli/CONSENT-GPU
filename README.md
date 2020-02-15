@@ -1,4 +1,8 @@
-# CONSENT
+# CONSENT-GPU
+
+CONSENT-GPU is a GPU-accelerated version of the homonymous long reads self-correction tool. It leverages a state-of-the-art implementation of multiple sequence alignment to achieve greater correction throughput while maintaining the quality of the results of the original tool. It requires a CUDA-capable GPU and performs best when run in a multithreading and multiprocessor environment.
+
+# About CONSENT
 
 https://github.com/morispi/CONSENT
 
