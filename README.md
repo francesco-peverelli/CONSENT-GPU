@@ -1,4 +1,10 @@
-# CONSENT
+# CONSENT-GPU
+
+CONSENT-GPU is a GPU-accelerated version of the homonymous long reads self-correction tool. It leverages a state-of-the-art implementation of multiple sequence alignment to achieve greater correction throughput while maintaining the quality of the results of the original tool. It requires a CUDA-capable GPU and performs best when run in a multithreading and multiprocessor environment.
+
+# About CONSENT
+
+https://github.com/morispi/CONSENT
 
 CONSENT (sCalable self-cOrrectioN of long reads with multiple SEquence alignmeNT) is a self-correction method for long reads.
 It works by, first, computing overlaps between the long reads, in order to define an alignment pile (i.e. a set of overlapping reads used for
@@ -15,6 +21,16 @@ Requirments
   - A g++ version supporting C++11
   - fpa (at least v0.4) accessible through your PATH environment variable (https://github.com/natir/fpa)
   
+# GPU ACCELERATION
+
+Additional Requirements
+--------------
+
+  - A CUDA capable GPU.
+  - CUDA Toolkit 9.0 or higher.
+  
+NOTE: the settings in the BMEAN-GPU library https://github.com/francesco-peverelli/BMAN-GPU are tuned for the NVIDIA Tesla V100 GPU. Edit BOA_GPU/poa-constants.h to tune the kernels to another GPU according to its global memory size
+
 Installation
 --------------
 
@@ -73,20 +89,21 @@ To run CONSENT for contigs polishing, run the followning command:
 Notes
 --------------
 
-CONSENT has been developed and tested on x86-64 GNU/Linux.          
+CONSENT-GPU has been developed and tested on x86-64 GNU/Linux and the NVIDIA Tesla V100 GPU.          
 Support for any other platform has not been tested.
 
 Authors
 --------------
 
-Pierre Morisse, Camille Marchet, Antoine Limasset, Arnaud Lefebvre and Thierry Lecroq.
+Francesco Peverelli, Lorenzo Di Tucci, Marco Domenico Santambrogio, Nan Ding, Steven Hofmeyr, Aydin Buluc, Leonid Oliker, and Katherine Yelick
 
 Reference
 --------------
 
-Pierre Morisse, Camille Marchet, Antoine Limasset, Thierry Lecroq, Arnaud Lefebvre; CONSENT: Scalable self-correction of long reads with multiple sequence alignment, bioRxiv 546630; doi: https://doi.org/10.1101/546630 
+The preprint of this work is available at
+https://www.biorxiv.org/content/10.1101/2020.02.14.946939v1
 
 Contact
 --------------
 
-You can report problems and bugs to pierre[dot]morisse2[at]univ-rouen[dot]fr
+You can report problems and bugs to francesco1[dot]peverelli[at]mail[dot]polimi[dot]it
