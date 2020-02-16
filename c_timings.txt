@@ -78,3 +78,15 @@ Timed Wed Nov 27 00:41:18 2019
 : 6303277 milliseconds
 Timed Wed Nov 27 03:21:47 2019
 : 5093668 milliseconds
+Timed Thu Nov 28 03:03:30 2019
+: 387038 milliseconds
+Timed Thu Nov 28 03:10:54 2019
+: 397006 milliseconds
+Timed Thu Nov 28 03:23:37 2019
+: 1001898 milliseconds
+Timed Sat Dec  7 07:49:39 2019
+: 17125215 milliseconds
+Timed Mon Dec  9 00:48:25 2019
+: 17114222 milliseconds
+Timed Thu Dec 12 03:58:07 2019
+: 9767424 milliseconds

@@ -1,3 +1,6 @@
 [submodule "BMEAN"]
 	path = BMEAN
 	url = ./BMEAN
+[submodule "BMAN-GPU"]
+	path = BMAN-GPU
+	url = https://github.com/francesco-peverelli/BMAN-GPU
