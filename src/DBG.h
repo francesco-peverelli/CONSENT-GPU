@@ -4,7 +4,7 @@
 #include <set>
 #include <algorithm>
 #include <iostream>
-#include "../BMEAN/utils.h"
+#include "../BMAN-GPU/utils.h"
 #include "reverseComplement.h"
 using namespace std;
 
