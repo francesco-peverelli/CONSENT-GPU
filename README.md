@@ -29,6 +29,8 @@ Additional Requirements
   - A CUDA capable GPU.
   - CUDA Toolkit 9.0 or higher.
   
+The code has been tested with gcc 7.3.0 and gcc 8.3.0, and CUDA 10.2
+  
 NOTE: the settings in the BMEAN-GPU library https://github.com/francesco-peverelli/BMAN-GPU are tuned for the NVIDIA Tesla V100 GPU. Edit BOA_GPU/poa-constants.h to tune the kernels to another GPU according to its global memory size
 
 Installation

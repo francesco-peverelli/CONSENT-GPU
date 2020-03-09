@@ -15,7 +15,7 @@
 #include <unistd.h>
 #include <map>
 #include "alignmentPiles.h"
-#include "../BMEAN/utils.h"
+#include "../BMAN-GPU/utils.h"
 #include "../CTPL/ctpl_stl.h"
 
 struct POASeq {

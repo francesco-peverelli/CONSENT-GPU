@@ -6,9 +6,9 @@
 #include "CONSENT.h"
 #include "kMersProcessing.h"
 #include "DBG.h"
-#include "../BMEAN/bmean.h"
-#include "../BMEAN/utils.h"
-#include "../BMEAN/Complete-Striped-Smith-Waterman-Library/src/ssw_cpp.h"
+#include "../BMAN-GPU/bmean.h"
+#include "../BMAN-GPU/utils.h"
+#include "../BMAN-GPU/Complete-Striped-Smith-Waterman-Library/src/ssw_cpp.h"
 #include "sys/time.h"
 #include "sys/resource.h"
 

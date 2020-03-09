@@ -1,6 +1,6 @@
 #!/bin/bash
 
-cd BMEAN;
+cd BMAN-GPU
 ./install.sh;
 cd ..;
 cd minimap2;
