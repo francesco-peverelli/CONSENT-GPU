@@ -16,6 +16,7 @@ std::mutex outMtx;
 std::mutex break_mtx;
 std::map<std::string, std::vector<bool>> readIndex;
 bool doTrimRead = true;
+unsigned maxBatchGl = 5000000;
 
 uint64_t getMemInfo(){
 	
@@ -674,7 +675,7 @@ processRead_enqueue_batch(
 		//assign n
 		enqueued_tasks_v[i] = processRead_enqueue(tid, alignments[i], minSupport, maxSupport, windowSize, merSize, commonKMers, 
 				                          minAnchors, solidThresh, windowOverlap, maxMSA, path);
-		if(MSABMAAC_gpu_get_manager_tasks()  >= 5000000){
+		if(MSABMAAC_gpu_get_manager_tasks()  >= maxBatchGl){
 			lock_guard<mutex> lock(break_mtx);
 			if(!early_break){
 				cerr << "Thread " << tid << " triggered cutoff at " << i << ": " << MSABMAAC_gpu_get_manager_tasks()  << "\n";
@@ -889,13 +890,14 @@ std::vector<Alignment> getNextReadPile(std::ifstream& f) {
 	return curReadAlignments;
 }
 
-void runCorrection_gpu(std::string PAFIndex, std::string alignmentFile, unsigned minSupport, unsigned maxSupport, unsigned windowSize, unsigned merSize, unsigned commonKMers, unsigned minAnchors, unsigned solidThresh, unsigned windowOverlap, unsigned nbThreads, std::string readsFile, std::string proofFile, unsigned maxMSA, std::string path) {
+void runCorrection_gpu(std::string PAFIndex, std::string alignmentFile, unsigned minSupport, unsigned maxSupport, unsigned windowSize, unsigned merSize, unsigned commonKMers, unsigned minAnchors, unsigned solidThresh, unsigned windowOverlap, unsigned nbThreads, std::string readsFile, std::string proofFile, unsigned maxMSA, unsigned maxBatch, std::string path) {
 	
 	std::ifstream templates(PAFIndex);
 	std::ifstream alignments(alignmentFile);
 	
 	int batch_size = 1200000;
-	
+	maxBatchGl = maxBatch;
+
 	vector<vector<Alignment>> curReadAlignments_v(batch_size);
 	
 	cerr << nbThreads << " active threads\n";

@@ -9,7 +9,7 @@
 int main(int argc, char* argv[]) {
 
 	if (argc < 2) {
-		fprintf(stderr, "Usage: %s [-a alignmentFile.paf] [-s minSupportForGoodRegions] [-l minLengthForGoodRegions] [-j threadsNb] \n\n", argv[0]);
+		fprintf(stderr, "Usage: %s [-a alignmentFile.paf] [-s minSupportForGoodRegions] [-l minLengthForGoodRegions] [-j threadsNb] [-B maxBatch]\n\n", argv[0]);
 		exit(EXIT_FAILURE);
 	}
 
@@ -17,7 +17,7 @@ int main(int argc, char* argv[]) {
 	PAFIndex = "";
 	alignmentFile = "";
 	readsFile = "";
-	unsigned minSupport, maxSupport, maxMSA, windowSize, nbThreads, opt, merSize, commonKMers, minAnchors, solidThresh, windowOverlap, nbReads;
+	unsigned minSupport, maxSupport, maxMSA, windowSize, nbThreads, opt, merSize, commonKMers, minAnchors, solidThresh, windowOverlap, nbReads, maxBatch;
 
 	minSupport = 4;
 	maxSupport = 1000;
@@ -30,15 +30,19 @@ int main(int argc, char* argv[]) {
 	windowOverlap = 50;
 	nbThreads = 1;
 	nbReads = 0;
+	maxBatch = 5000000;
 
 
-	while ((opt = getopt(argc, argv, "a:A:d:k:s:S:M:l:f:e:p:c:m:j:w:m:r:R:n:i:")) != -1) {
+	while ((opt = getopt(argc, argv, "a:B:A:d:k:s:S:M:l:f:e:p:c:m:j:w:m:r:R:n:i:")) != -1) {
         switch (opt) {
         	case 'i':
         		PAFIndex = optarg;
         		break;
 			case 'a':
 				alignmentFile = optarg;
+				break;
+			case 'B':
+				maxBatch = atoi(optarg);
 				break;
 			case 's':
 				minSupport = atoi(optarg);
@@ -84,7 +88,7 @@ int main(int argc, char* argv[]) {
 				nbThreads = atoi(optarg);
 				break;
 			default: /* '?' */
-				fprintf(stderr, "Usage: %s [-a alignmentFile.paf] [-k merSize] [-s minSupportForGoodRegions] [-l minLengthForGoodRegions] [-f freqThresholdForKMers] [-e maxError] [-p freqThresholdForKPersFreqs] [-c freqThresholdForKPersCons] [-m mode (0 for regions, 1 for cluster)] [-j threadsNb] \n\n", argv[0]);
+				fprintf(stderr, "Usage: %s [-a alignmentFile.paf] [-k merSize] [-s minSupportForGoodRegions] [-l minLengthForGoodRegions] [-f freqThresholdForKMers] [-e maxError] [-p freqThresholdForKPersFreqs] [-c freqThresholdForKPersCons] [-m mode (0 for regions, 1 for cluster)] [-j threadsNb] [-B maxBatch]\n\n", argv[0]);
 				exit(EXIT_FAILURE);
         }
     }
@@ -92,7 +96,7 @@ int main(int argc, char* argv[]) {
 
 #if GPU 
 	
-	runCorrection_gpu(PAFIndex, alignmentFile, minSupport, maxSupport, windowSize, merSize, commonKMers, minAnchors, solidThresh, windowOverlap, nbThreads, readsFile, proofFile, maxMSA, path);
+	runCorrection_gpu(PAFIndex, alignmentFile, minSupport, maxSupport, windowSize, merSize, commonKMers, minAnchors, solidThresh, windowOverlap, nbThreads, readsFile, proofFile, maxMSA, maxBatch, path);
 
 #endif
 #if (GPU == 0)
